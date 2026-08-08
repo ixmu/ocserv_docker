@@ -27,12 +27,10 @@ RUN apk add --no-cache \
     coreutils \
     pkgconf
 
-# 下载源码并编译安装到指定目录
-RUN curl -4 -sSL --retry 3 --retry-delay 5 \
-    -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-    "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
+# 临时调试：从指定的临时 HTTP 服务器拉取 1.5.0 版本文件
+RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz \
     && tar -xf ocserv.tar.xz \
-    && cd ocserv-${OCSERV_VERSION} \
+    && cd ocserv-1.5.0 \
     && ./configure --prefix=/usr --sysconfdir=/etc \
     && make -j$(nproc) \
     && make install DESTDIR=/install_root
