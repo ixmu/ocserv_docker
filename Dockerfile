@@ -23,7 +23,9 @@ RUN apk add --no-cache \
     libseccomp-dev \
     linux-headers \
     tar \
-    xz
+    xz \
+    coreutils \
+    pkgconf
 
 # 下载源码并编译安装到指定目录
 RUN curl -SL "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
