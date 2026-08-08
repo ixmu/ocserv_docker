@@ -1,33 +1,28 @@
 # ==========================================
-# 阶段 1：编译环境 (Builder)
+# 阶段 1：编译环境 (Builder) - GitLab 源码直接编译版
 # ==========================================
 FROM alpine:latest AS builder
 
-# 1. 加入 autoconf、automake、libtool、bash 和 dos2unix (专门解决各种 127 疑难杂症)
+# 接收从 GitHub Actions 传进来的动态版本号
+ARG OCSERV_VERSION=1.5.0
+
+# 1. 安装极其完整的依赖环境（新增 git、gettext-dev 等底层构建工具）
 RUN apk add --no-cache \
-    build-base curl gnutls-dev readline-dev libnl3-dev lz4-dev \
+    build-base git gnutls-dev readline-dev libnl3-dev lz4-dev \
     libev-dev protobuf-c-dev linux-pam-dev libseccomp-dev linux-headers \
-    tar xz coreutils pkgconf gperf talloc-dev \
-    autoconf automake libtool bash dos2unix
+    coreutils pkgconf gperf talloc-dev \
+    autoconf automake libtool bash gettext-dev
 
 WORKDIR /build_ocserv
 
-RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz
+# 2. 【核心】直接从官方 GitLab 克隆对应版本的源码！
+# 完美避开 infradead 网站对云服务器 IP 的封锁，不需要解压，绝对不会出现目录名错误
+RUN git clone --depth 1 --branch ${OCSERV_VERSION} https://gitlab.com/openconnect/ocserv.git .
 
-RUN tar -xf ocserv.tar.xz --strip-components=1
+# 3. Git 仓库拉下来的源码默认没有 configure，必须生成
+RUN autoreconf -fvi
 
-# 2. 智能预处理环节：
-# - 如果没有 configure 文件，就用 autoreconf 自动生成
-# - 修复可能的 Windows 换行符问题
-# - 赋予执行权限
-RUN if [ ! -f "./configure" ]; then \
-        echo "configure does not exist. Generating..."; \
-        autoreconf -fvi; \
-    fi \
-    && dos2unix configure \
-    && chmod +x configure
-
-# 3. 使用 bash 显式执行 configure，彻底避开默认 sh 的兼容性问题
+# 4. 执行配置，开始编译
 RUN bash ./configure --prefix=/usr --sysconfdir=/etc
 
 RUN make -j$(nproc)
