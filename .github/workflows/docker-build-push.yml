@@ -1,74 +1,127 @@
-name: Build and Publish ocserv to Docker Hub
+name: Native Build and Publish ocserv
 
-# 触发条件配置
 on:
-  # 1. 定时触发：每周日 UTC 时间凌晨 2:00 执行一次 (北京时间上午10点)
   schedule:
     - cron: '0 2 * * 0'
-  # 2. 手动触发：允许在 GitHub 网页端手动点击运行
   workflow_dispatch:
 
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    
-    steps:
-      # 1. 检出代码
-      - name: Checkout Code
-        uses: actions/checkout@v4
+# 提取环境变量，避免重复写 Docker Hub 仓库名
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/ocserv
 
-      # 2. 自动检测 ocserv 的最新版本号
+jobs:
+  # ==========================================
+  # 阶段 1：自动获取最新版本号
+  # ==========================================
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+    steps:
       - name: Get latest ocserv version
         id: get_version
         run: |
-          # 请求 GitLab API 获取 openconnect/ocserv 项目的所有标签，筛选纯数字版本号并取最大值
           LATEST_VERSION=$(curl -s "https://gitlab.com/api/v4/projects/openconnect%2Focserv/repository/tags" | jq -r '.[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-          
           if [ -z "$LATEST_VERSION" ]; then
             echo "Error: Failed to fetch version!"
             exit 1
           fi
-          
           echo "Found latest version: $LATEST_VERSION"
-          # 将版本号输出为 GitHub Actions 变量，供后续步骤使用
           echo "VERSION=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      # 3. 设置 QEMU（用于多架构编译）
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+  # ==========================================
+  # 阶段 2：使用原生服务器并行编译 (Matrix)
+  # ==========================================
+  build:
+    needs: prepare
+    strategy:
+      # 并行策略：分别在 ubuntu-latest (amd64) 和 ubuntu-24.04-arm (arm64) 上运行
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    
+    runs-on: ${{ matrix.runner }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # 4. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 5. 登录 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 6. 生成 Docker 镜像的 Tag 标签（动态打上 latest 和 具体版本号）
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKER_USERNAME }}/ocserv
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.get_version.outputs.VERSION }}
-
-      # 7. 编译并推送到 Docker Hub
-      - name: Build and Push Docker image
+      # 这里不直接打 Tag，而是通过 push-by-digest 上传数据层
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # 核心修改：将动态获取的版本号传给 Dockerfile 中的 ARG OCSERV_VERSION
+          platforms: ${{ matrix.platform }}
           build-args: |
-            OCSERV_VERSION=${{ steps.get_version.outputs.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            OCSERV_VERSION=${{ needs.prepare.outputs.version }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+
+      # 导出该架构的哈希值 (Digest)
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      # 将哈希值作为伪影 (Artifact) 上传，供下一阶段合并
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ==========================================
+  # 阶段 3：合并 Digest 并打上最终标签
+  # ==========================================
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      # 下载阶段 2 产生的所有架构的哈希值
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 创建 Manifest 列表，将 amd64 和 arm64 绑定到版本号及 latest 标签，并发布
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+            
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
