@@ -3,10 +3,13 @@
 # ==========================================
 FROM alpine:latest AS builder
 
-# 指定要编译的 ocserv 版本
+# 声明变量（如果不传参，默认是 1.3.0。如果 Actions 传了参数，就会覆盖这个默认值）
 ARG OCSERV_VERSION=1.3.0
 
-# 安装编译所需的依赖
+# 打印一下构建时的版本号，方便在 Actions 日志中确认
+RUN echo "Building ocserv version: ${OCSERV_VERSION}"
+
+# 安装编译所需的依赖...
 RUN apk add --no-cache \
     build-base \
     curl \

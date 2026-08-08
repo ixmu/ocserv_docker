@@ -1,12 +1,11 @@
 name: Build and Publish ocserv to Docker Hub
 
-# 触发条件：当推送到 main 分支，或手动触发时执行
+# 触发条件配置
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'README.md'
+  # 1. 定时触发：每周日 UTC 时间凌晨 2:00 执行一次 (北京时间上午10点)
+  schedule:
+    - cron: '0 2 * * 0'
+  # 2. 手动触发：允许在 GitHub 网页端手动点击运行
   workflow_dispatch:
 
 jobs:
@@ -18,22 +17,38 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. 设置 QEMU（用于模拟不同 CPU 架构，如 arm64）
+      # 2. 自动检测 ocserv 的最新版本号
+      - name: Get latest ocserv version
+        id: get_version
+        run: |
+          # 请求 GitLab API 获取 openconnect/ocserv 项目的所有标签，筛选纯数字版本号并取最大值
+          LATEST_VERSION=$(curl -s "https://gitlab.com/api/v4/projects/openconnect%2Focserv/repository/tags" | jq -r '.[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "Error: Failed to fetch version!"
+            exit 1
+          fi
+          
+          echo "Found latest version: $LATEST_VERSION"
+          # 将版本号输出为 GitHub Actions 变量，供后续步骤使用
+          echo "VERSION=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+      # 3. 设置 QEMU（用于多架构编译）
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      # 3. 设置 Docker Buildx（多架构构建核心组件）
+      # 4. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. 登录 Docker Hub
+      # 5. 登录 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 5. 生成 Docker 镜像标签的元数据
+      # 6. 生成 Docker 镜像的 Tag 标签（动态打上 latest 和 具体版本号）
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -41,17 +56,19 @@ jobs:
           images: ${{ secrets.DOCKER_USERNAME }}/ocserv
           tags: |
             type=raw,value=latest
-            type=raw,value=1.3.0
+            type=raw,value=${{ steps.get_version.outputs.VERSION }}
 
-      # 6. 编译并推送多架构镜像
+      # 7. 编译并推送到 Docker Hub
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 核心配置：同时构建 amd64 和 arm64
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 核心修改：将动态获取的版本号传给 Dockerfile 中的 ARG OCSERV_VERSION
+          build-args: |
+            OCSERV_VERSION=${{ steps.get_version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
