@@ -28,7 +28,9 @@ RUN apk add --no-cache \
     pkgconf
 
 # 下载源码并编译安装到指定目录
-RUN curl -SL "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
+RUN curl -4 -sSL --retry 3 --retry-delay 5 \
+    -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+    "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
     && tar -xf ocserv.tar.xz \
     && cd ocserv-${OCSERV_VERSION} \
     && ./configure --prefix=/usr --sysconfdir=/etc \
