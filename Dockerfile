@@ -1,49 +1,37 @@
 # ==========================================
-# 阶段 1：编译环境 (Builder) - 拆分调试版
+# 阶段 1：编译环境 (Builder)
 # ==========================================
 FROM alpine:latest AS builder
 
-# 安装所有可能的依赖
+# 1. 加入 autoconf、automake、libtool、bash 和 dos2unix (专门解决各种 127 疑难杂症)
 RUN apk add --no-cache \
-    build-base \
-    curl \
-    gnutls-dev \
-    readline-dev \
-    libnl3-dev \
-    lz4-dev \
-    libev-dev \
-    protobuf-c-dev \
-    linux-pam-dev \
-    libseccomp-dev \
-    linux-headers \
-    tar \
-    xz \
-    coreutils \
-    pkgconf \
-    gperf \
-    talloc-dev
+    build-base curl gnutls-dev readline-dev libnl3-dev lz4-dev \
+    libev-dev protobuf-c-dev linux-pam-dev libseccomp-dev linux-headers \
+    tar xz coreutils pkgconf gperf talloc-dev \
+    autoconf automake libtool bash dos2unix
 
-# 1. 专门创建一个确定的构建目录并进入
 WORKDIR /build_ocserv
 
-# 2. 下载临时包
 RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz
 
-# 3. 核心修改：无视文件夹名称解压
-# --strip-components=1 会把压缩包里第一层目录剥掉，把里面的文件直接平铺到当前的 /build_ocserv 目录下
 RUN tar -xf ocserv.tar.xz --strip-components=1
 
-# 4. 增加排错视野：打印当前目录所有文件
-# 这样在 Action 日志里就能清楚看到 ./configure 到底存不存在，以及有没有权限
-RUN ls -la
+# 2. 智能预处理环节：
+# - 如果没有 configure 文件，就用 autoreconf 自动生成
+# - 修复可能的 Windows 换行符问题
+# - 赋予执行权限
+RUN if [ ! -f "./configure" ]; then \
+        echo "configure does not exist. Generating..."; \
+        autoreconf -fvi; \
+    fi \
+    && dos2unix configure \
+    && chmod +x configure
 
-# 5. 执行配置
-RUN ./configure --prefix=/usr --sysconfdir=/etc
+# 3. 使用 bash 显式执行 configure，彻底避开默认 sh 的兼容性问题
+RUN bash ./configure --prefix=/usr --sysconfdir=/etc
 
-# 6. 开始编译
 RUN make -j$(nproc)
 
-# 7. 安装
 RUN make install DESTDIR=/install_root
 
 
