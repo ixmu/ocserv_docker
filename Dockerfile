@@ -1,15 +1,9 @@
 # ==========================================
-# 阶段 1：编译环境 (Builder)
+# 阶段 1：编译环境 (Builder) - 拆分调试版
 # ==========================================
 FROM alpine:latest AS builder
 
-# 声明变量（如果不传参，默认是 1.3.0。如果 Actions 传了参数，就会覆盖这个默认值）
-ARG OCSERV_VERSION=1.3.0
-
-# 打印一下构建时的版本号，方便在 Actions 日志中确认
-RUN echo "Building ocserv version: ${OCSERV_VERSION}"
-
-# 安装编译所需的依赖...
+# 安装所有可能的依赖
 RUN apk add --no-cache \
     build-base \
     curl \
@@ -25,15 +19,27 @@ RUN apk add --no-cache \
     tar \
     xz \
     coreutils \
-    pkgconf
+    pkgconf \
+    gperf \
+    talloc-dev
 
-# 临时调试：从指定的临时 HTTP 服务器拉取 1.5.0 版本文件
-RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz \
-    && tar -xf ocserv.tar.xz \
-    && cd ocserv-1.5.0 \
-    && ./configure --prefix=/usr --sysconfdir=/etc \
-    && make -j$(nproc) \
-    && make install DESTDIR=/install_root
+# 调试步骤 1：单独下载
+RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz
+
+# 调试步骤 2：单独解压
+RUN tar -xf ocserv.tar.xz
+
+# 切换工作目录（相当于在接下来的所有步骤前执行 cd ocserv-1.5.0）
+WORKDIR /ocserv-1.5.0
+
+# 调试步骤 3：配置生成 Makefile (如果报错127，说明 ./configure 内部找不到某些库或 pkg-config)
+RUN ./configure --prefix=/usr --sysconfdir=/etc
+
+# 调试步骤 4：开始编译 (如果报错127，说明系统里没有 make，或者没有 nproc，或者缺 gperf)
+RUN make -j$(nproc)
+
+# 调试步骤 5：安装到目标文件夹
+RUN make install DESTDIR=/install_root
 
 
 # ==========================================
