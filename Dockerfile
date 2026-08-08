@@ -19,7 +19,7 @@ RUN apk add --no-cache \
     lz4-dev \
     libev-dev \
     protobuf-c-dev \
-    pam-dev \
+    linux-pam-dev \
     libseccomp-dev \
     linux-headers \
     tar \
@@ -47,7 +47,7 @@ RUN apk add --no-cache \
     lz4-libs \
     libev \
     protobuf-c \
-    pam \
+    linux-pam \
     libseccomp \
     iptables \
     iproute2 \
