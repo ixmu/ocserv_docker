@@ -23,22 +23,27 @@ RUN apk add --no-cache \
     gperf \
     talloc-dev
 
-# 调试步骤 1：单独下载
+# 1. 专门创建一个确定的构建目录并进入
+WORKDIR /build_ocserv
+
+# 2. 下载临时包
 RUN curl -sSL "http://117.55.230.121/ocserv-1.5.0.tar.xz" -o ocserv.tar.xz
 
-# 调试步骤 2：单独解压
-RUN tar -xf ocserv.tar.xz
+# 3. 核心修改：无视文件夹名称解压
+# --strip-components=1 会把压缩包里第一层目录剥掉，把里面的文件直接平铺到当前的 /build_ocserv 目录下
+RUN tar -xf ocserv.tar.xz --strip-components=1
 
-# 切换工作目录（相当于在接下来的所有步骤前执行 cd ocserv-1.5.0）
-WORKDIR /ocserv-1.5.0
+# 4. 增加排错视野：打印当前目录所有文件
+# 这样在 Action 日志里就能清楚看到 ./configure 到底存不存在，以及有没有权限
+RUN ls -la
 
-# 调试步骤 3：配置生成 Makefile (如果报错127，说明 ./configure 内部找不到某些库或 pkg-config)
+# 5. 执行配置
 RUN ./configure --prefix=/usr --sysconfdir=/etc
 
-# 调试步骤 4：开始编译 (如果报错127，说明系统里没有 make，或者没有 nproc，或者缺 gperf)
+# 6. 开始编译
 RUN make -j$(nproc)
 
-# 调试步骤 5：安装到目标文件夹
+# 7. 安装
 RUN make install DESTDIR=/install_root
 
 
