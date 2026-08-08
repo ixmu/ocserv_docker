@@ -26,7 +26,7 @@ RUN apk add --no-cache \
     xz
 
 # 下载源码并编译安装到指定目录
-RUN curl -SL "ftp://ftp.infradead.org/pub/ocserv/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
+RUN curl -SL "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" -o ocserv.tar.xz \
     && tar -xf ocserv.tar.xz \
     && cd ocserv-${OCSERV_VERSION} \
     && ./configure --prefix=/usr --sysconfdir=/etc \
